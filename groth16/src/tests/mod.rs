@@ -438,3 +438,115 @@ fn zero_coeff_one_var() {
 fn zero_coeff_non_one_var() {
     zero_coeff_test(false);
 }
+
+/// Exercises batch verification over a small scalar field, which uses full-field weights
+/// and the group's own multiplication. A fixed seed keeps the `1 / (r - 1)` chance of
+/// accepting an invalid batch over this field from making the test flaky.
+#[test]
+fn batch_verify_small_field() {
+    use rand::{SeedableRng, rngs::StdRng};
+
+    let vk = super::VerifyingKey::<DummyEngine> {
+        alpha_g1: Fr::ONE,
+        beta_g1: Fr::ONE,
+        beta_g2: Fr::ONE,
+        gamma_g2: Fr::ONE,
+        delta_g1: Fr::ONE,
+        delta_g2: Fr::ONE,
+        ic: vec![Fr::ONE],
+    };
+    let proof = super::Proof::<DummyEngine> {
+        a: Fr::from(2),
+        b: Fr::ONE,
+        c: Fr::ZERO,
+    };
+    let pvk = prepare_verifying_key(&vk);
+    assert!(verify_proof(&pvk, &proof, &[]).is_ok());
+
+    for size in [0, 1, 8, 9] {
+        for invalid in std::iter::once(None).chain((0..size).map(Some)) {
+            let mut batch = super::batch::Verifier::new();
+            for index in 0..size {
+                let mut proof = proof.clone();
+                if invalid == Some(index) {
+                    proof.c = Fr::ONE;
+                }
+                batch.queue((proof, vec![]));
+            }
+            assert_eq!(
+                batch.verify(StdRng::seed_from_u64(0), &vk).is_ok(),
+                invalid.is_none()
+            );
+        }
+    }
+}
+
+#[test]
+fn multiexp_vartime_matches_multiplication() {
+    use bls12_381::{G1Projective, Scalar};
+    use group::Group;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    use crate::verifier::batch::multiexp_vartime;
+
+    let mut rng = StdRng::seed_from_u64(0);
+    // Scalars whose wNAF digits carry into higher windows, then random scalars.
+    let mut scalars = vec![
+        Scalar::ZERO,
+        Scalar::ONE,
+        -Scalar::ONE,
+        Scalar::from(7),
+        Scalar::from(9),
+        Scalar::from(15),
+        Scalar::from_u128(u128::MAX),
+        Scalar::from(2).pow_vartime(&[254, 0, 0, 0]),
+    ];
+    scalars.extend((0..24).map(|_| Scalar::random(&mut rng)));
+    let bases = scalars
+        .iter()
+        .map(|_| G1Projective::random(&mut rng))
+        .collect::<Vec<_>>();
+
+    for (base, scalar) in bases.iter().zip(&scalars) {
+        assert_eq!(multiexp_vartime(&[*base], &[*scalar]), base * scalar);
+    }
+    for len in 0..=scalars.len() {
+        let expected: G1Projective = bases[..len]
+            .iter()
+            .zip(&scalars[..len])
+            .map(|(base, scalar)| base * scalar)
+            .sum();
+        assert_eq!(multiexp_vartime(&bases[..len], &scalars[..len]), expected);
+    }
+}
+
+#[test]
+fn wnaf_digits_represent_integer() {
+    use crate::verifier::batch::wnaf;
+
+    for value in [0, 1, 7, 8, 9, 15, 0x0123_4567_89ab_cdef, u64::MAX] {
+        let digits = wnaf(&value.to_le_bytes());
+        let sum = digits
+            .iter()
+            .rev()
+            .fold(0, |sum, &digit| 2 * sum + i128::from(digit));
+        assert_eq!(sum, i128::from(value));
+        for (i, &digit) in digits.iter().enumerate() {
+            if digit != 0 {
+                assert!(digit % 2 != 0 && (-7..=7).contains(&digit));
+                assert!(digits[i + 1..].iter().take(3).all(|&digit| digit == 0));
+            }
+        }
+    }
+    // The digits of 2^64 - 1 are -1 at bit 0 and 1 at bit 64, beyond the last byte.
+    assert_eq!(wnaf(&[0xff; 8]).len(), 65);
+}
+
+#[test]
+fn wnaf_is_used_for_bls12_381_scalars() {
+    use crate::verifier::batch::is_little_endian;
+
+    assert!(is_little_endian::<bls12_381::Scalar>());
+    // The test field is too small for the probe value, so it uses the fallback.
+    assert!(!is_little_endian::<Fr>());
+}
