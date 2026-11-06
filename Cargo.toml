@@ -93,5 +93,5 @@ harness = false
 maintenance = { status = "actively-developed" }
 
 [patch.crates-io]
-pairing = { git = "https://github.com/upbqdn/pairing", rev = "cb99cc74b1f5b4e6ecfb7d83db8e4261439e4a13" }
-bls12_381 = { git = "https://github.com/upbqdn/bls12_381", rev = "625ef5e3d14a3fcf83932ac979df22d4a4bbc34d" }
+pairing = { git = "https://github.com/upbqdn/pairing", rev = "6cff6942e187ef62b21eac27a3bb545d041c5748" }
+bls12_381 = { git = "https://github.com/upbqdn/bls12_381", rev = "6e821c63247f13f29ab96562eea00ac6b37aa91f" }
