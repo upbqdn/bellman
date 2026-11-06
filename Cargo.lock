@@ -112,8 +112,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18f887f26229478dcd0e0d063566b51c68fb55a38fba21799c5f3371a74ec61f"
+source = "git+https://github.com/upbqdn/bls12_381?rev=8aab794d8c493762bd53c4ecd20e2d3b7a7898cf#8aab794d8c493762bd53c4ecd20e2d3b7a7898cf"
 dependencies = [
  "ff",
  "group",
@@ -549,8 +548,7 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 [[package]]
 name = "pairing"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33f6413397336802d16a342e69a5bd9c8b8cc2fa9fc9298044cd3443f77f1010"
+source = "git+https://github.com/upbqdn/pairing?rev=6cff6942e187ef62b21eac27a3bb545d041c5748#6cff6942e187ef62b21eac27a3bb545d041c5748"
 dependencies = [
  "group",
 ]
