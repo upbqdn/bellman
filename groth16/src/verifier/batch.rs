@@ -50,6 +50,9 @@ use rayon::{
 
 use crate::{PreparedVerifyingKey, Proof, VerifyingKey};
 
+mod prepared;
+pub use prepared::{PreparedBatchG2, PreparedBatchVerifyingKey};
+
 /// Samples a random batch weight, as described in the module documentation.
 fn random_weight<F: PrimeField>(rng: &mut impl Rng) -> F {
     loop {
@@ -191,16 +194,13 @@ fn shared_terms<E: MultiMillerLoop>(
     vk: &VerifyingKey<E>,
     gammas: &[E::Fr],
     delta: E::G1,
-) -> ([E::G1; 3], [E::G2Prepared; 3]) {
+) -> [E::G1; 3] {
     let ic = vk.ic.iter().map(|ic| ic.to_curve()).collect::<Vec<_>>();
     let psi = multiexp_vartime(&ic, gammas);
     // Multiplying `alpha_g1` by the sum of the weights is much cheaper than raising
     // `e(alpha_g1, beta_g2)` to that power in the target group.
     let alpha = multiexp_vartime(&[vk.alpha_g1.to_curve()], &gammas[..1]);
-    (
-        [delta, psi, alpha],
-        [vk.delta_g2.into(), vk.gamma_g2.into(), vk.beta_g2.into()],
-    )
+    [delta, psi, alpha]
 }
 
 /// Runs a Miller loop, normalizing all G1 points with one shared inversion.
@@ -278,42 +278,14 @@ where
     /// `Ok(())` if all proofs were verified and `VerificationError` otherwise.
     pub fn verify<R: Rng + CryptoRng>(
         self,
-        mut rng: R,
+        rng: R,
         vk: &VerifyingKey<E>,
     ) -> Result<(), VerificationError> {
-        if self
-            .items
-            .iter()
-            .any(|Item { inputs, .. }| inputs.len() + 1 != vk.ic.len())
-        {
-            return Err(VerificationError::InvalidVerifyingKey);
-        }
-
-        // An empty batch is trivially valid, even for a verifying key with no `ic` points.
         if self.items.is_empty() {
             return Ok(());
         }
-
-        let weights = (0..self.items.len())
-            .map(|i| {
-                if i == 0 {
-                    E::Fr::ONE
-                } else {
-                    random_weight(&mut rng)
-                }
-            })
-            .collect::<Vec<_>>();
-        let (mut g1, mut g2, gammas, delta) = weigh(&self.items, &weights, vk.ic.len());
-
-        let (shared_g1, shared_g2) = shared_terms(vk, &gammas, delta);
-        g1.extend(shared_g1);
-        g2.extend(shared_g2);
-
-        if miller_loop::<E>(&g1, &g2).final_exponentiation_vartime() == E::Gt::identity() {
-            Ok(())
-        } else {
-            Err(VerificationError::InvalidProof)
-        }
+        let g2 = PreparedBatchG2::for_one_batch(vk);
+        self.verify_prepared(rng, &PreparedBatchVerifyingKey::from_cached(vk, &g2)?)
     }
 
     /// Perform batch verification with a particular `VerifyingKey`, returning
@@ -323,6 +295,20 @@ where
     /// threadpool.
     #[cfg(feature = "multicore")]
     pub fn verify_multicore(self, vk: &VerifyingKey<E>) -> Result<(), VerificationError> {
+        if self.items.is_empty() {
+            return Ok(());
+        }
+        let g2 = PreparedBatchG2::for_one_batch(vk);
+        self.verify_multicore_prepared(&PreparedBatchVerifyingKey::from_cached(vk, &g2)?)
+    }
+
+    /// Verifies a batch in parallel while borrowing reusable fixed G2 terms.
+    #[cfg(feature = "multicore")]
+    pub fn verify_multicore_prepared(
+        self,
+        key: &PreparedBatchVerifyingKey<'_, E>,
+    ) -> Result<(), VerificationError> {
+        let vk = key.vk;
         if self
             .items
             .iter()
@@ -349,7 +335,11 @@ where
 
         let ic_len = vk.ic.len();
 
-        let chunk_size = self.items.len().div_ceil(rayon::current_num_threads()).clamp(1, 8);
+        let chunk_size = self
+            .items
+            .len()
+            .div_ceil(rayon::current_num_threads())
+            .clamp(1, 8);
         let acc = self
             .items
             .par_chunks(chunk_size)
@@ -394,8 +384,11 @@ where
         match acc.ml_result {
             None => Ok(()),
             Some(mut ml_result) => {
-                let (g1, g2) = shared_terms(vk, &acc.gammas, acc.delta);
-                ml_result += miller_loop::<E>(&g1, &g2);
+                let g1 = shared_terms(vk, &acc.gammas, acc.delta);
+                let mut affine = [E::G1Affine::identity(); 3];
+                E::G1::batch_normalize(&g1, &mut affine);
+                let terms = affine.iter().zip(&key.g2.terms).collect::<Vec<_>>();
+                ml_result += E::multi_miller_loop(&terms);
 
                 if ml_result.final_exponentiation_vartime() == E::Gt::identity() {
                     Ok(())

@@ -465,7 +465,12 @@ fn adaptive_chunks_match_single_across_thread_counts() {
             .install(|| {
                 let mut rng = StdRng::seed_from_u64(3);
                 for size in [0, 1, 2, 7, 8, 9, 17, 33] {
-                    let mut items = proofs.iter().cycle().take(size).cloned().collect::<Vec<_>>();
+                    let mut items = proofs
+                        .iter()
+                        .cycle()
+                        .take(size)
+                        .cloned()
+                        .collect::<Vec<_>>();
                     assert_batch_matches_single(&vk, &pvk, &items, &mut rng);
                     if size > 1 {
                         // Opposite errors cannot cancel across independently weighted chunks.
@@ -477,4 +482,117 @@ fn adaptive_chunks_match_single_across_thread_counts() {
                 }
             });
     }
+}
+
+#[test]
+fn cached_g2_matches_original_batch_and_rejects_wrong_keys() {
+    let (vk, pvk, proofs) = batch_fixture();
+    let cache = batch::PreparedBatchG2::from(&vk);
+    let key = batch::PreparedBatchVerifyingKey::from_cached(&vk, &cache).unwrap();
+    for size in [0, 1, 2, 4, 9] {
+        for valid in [true, false] {
+            let mut items = proofs
+                .iter()
+                .cycle()
+                .take(size)
+                .cloned()
+                .collect::<Vec<_>>();
+            if !valid && size > 0 {
+                corrupt(&mut items[size - 1], size);
+            }
+            let expected = items.iter().all(|(p, i)| verify_proof(&pvk, p, i).is_ok());
+            let make_batch = || {
+                let mut verifier = batch::Verifier::new();
+                for item in &items {
+                    verifier.queue(item.clone());
+                }
+                verifier
+            };
+            let mut rng = StdRng::seed_from_u64(5);
+            assert!(is_expected(
+                make_batch().verify_prepared(&mut rng, &key),
+                expected
+            ));
+            #[cfg(feature = "multicore")]
+            assert!(is_expected(
+                make_batch().verify_multicore_prepared(&key),
+                expected
+            ));
+        }
+    }
+    for term in 0..3 {
+        let mut other = vk.clone();
+        match term {
+            0 => other.beta_g2 = (other.beta_g2 + G2Projective::generator()).into(),
+            1 => other.gamma_g2 = (other.gamma_g2 + G2Projective::generator()).into(),
+            _ => other.delta_g2 = (other.delta_g2 + G2Projective::generator()).into(),
+        }
+        assert!(matches!(
+            batch::PreparedBatchVerifyingKey::from_cached(&other, &cache),
+            Err(VerificationError::InvalidVerifyingKey)
+        ));
+    }
+}
+
+#[test]
+fn joint_batches_share_only_one_unit_weight() {
+    let (vk, _, proofs) = batch_fixture();
+    let mut other_vk = vk.clone();
+    other_vk.beta_g2 = (vk.beta_g2 * Scalar::from(2)).into();
+    other_vk.alpha_g1 = (vk.alpha_g1 * Scalar::from(2).invert().unwrap()).into();
+    let cache = batch::PreparedBatchG2::from(&vk);
+    let other_cache = batch::PreparedBatchG2::from(&other_vk);
+    let key = batch::PreparedBatchVerifyingKey::from_cached(&vk, &cache).unwrap();
+    let other_key = batch::PreparedBatchVerifyingKey::from_cached(&other_vk, &other_cache).unwrap();
+    for first_size in [0, 1, 3] {
+        for second_size in [0, 1, 3] {
+            for corrupt_first in [false, true] {
+                for corrupt_second in [false, true] {
+                    let mut first = batch::Verifier::new();
+                    let mut second = batch::Verifier::new();
+                    for i in 0..first_size {
+                        let mut item = proofs[i].clone();
+                        if corrupt_first && i == 0 {
+                            corrupt(&mut item, 2);
+                        }
+                        first.queue(item);
+                    }
+                    for i in 0..second_size {
+                        let mut item = proofs[i].clone();
+                        if corrupt_second && i == 0 {
+                            // Opposite C errors would cancel if both batches had a unit weight.
+                            item.0.c = (item.0.c - G1Projective::generator()).into();
+                        }
+                        second.queue(item);
+                    }
+                    let valid =
+                        !(corrupt_first && first_size > 0 || corrupt_second && second_size > 0);
+                    assert!(is_expected(
+                        first.verify_joint_prepared(
+                            second,
+                            StdRng::seed_from_u64(6),
+                            &key,
+                            &other_key
+                        ),
+                        valid,
+                    ));
+                }
+            }
+        }
+    }
+    let mut first = batch::Verifier::new();
+    let mut second = batch::Verifier::new();
+    first.queue(proofs[0].clone());
+    second.queue(proofs[1].clone());
+    let mut rng = FixedBytes([2; 16].into_iter().collect::<Vec<_>>().into_iter());
+    assert!(
+        first
+            .verify_joint_prepared(second, &mut rng, &key, &other_key)
+            .is_ok()
+    );
+    assert_eq!(
+        rng.0.len(),
+        0,
+        "only the second proof draws a random weight"
+    );
 }
