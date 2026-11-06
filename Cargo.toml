@@ -94,4 +94,4 @@ maintenance = { status = "actively-developed" }
 
 [patch.crates-io]
 pairing = { git = "https://github.com/upbqdn/pairing", rev = "6cff6942e187ef62b21eac27a3bb545d041c5748" }
-bls12_381 = { git = "https://github.com/upbqdn/bls12_381", rev = "ca6d7becac33e0d9b8abc55192fd9202f47a1153" }
+bls12_381 = { git = "https://github.com/upbqdn/bls12_381", rev = "ab49fee594b985bee45f31fb667babbd1f8d8e62" }
