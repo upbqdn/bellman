@@ -349,10 +349,10 @@ where
 
         let ic_len = vk.ic.len();
 
+        let chunk_size = self.items.len().div_ceil(rayon::current_num_threads()).clamp(1, 8);
         let acc = self
             .items
-            // This chunk size was obtained heuristically.
-            .par_chunks(8)
+            .par_chunks(chunk_size)
             .enumerate()
             .map(|(chunk, items)| {
                 let mut rng = UnwrapErr(SysRng);

@@ -452,3 +452,29 @@ fn batch_retries_zero_weight() {
         assert_eq!(rng.0.len(), 0);
     }
 }
+
+#[test]
+#[cfg(feature = "multicore")]
+fn adaptive_chunks_match_single_across_thread_counts() {
+    let (vk, pvk, proofs) = batch_fixture();
+    for threads in [1, 2, 4] {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap()
+            .install(|| {
+                let mut rng = StdRng::seed_from_u64(3);
+                for size in [0, 1, 2, 7, 8, 9, 17, 33] {
+                    let mut items = proofs.iter().cycle().take(size).cloned().collect::<Vec<_>>();
+                    assert_batch_matches_single(&vk, &pvk, &items, &mut rng);
+                    if size > 1 {
+                        // Opposite errors cannot cancel across independently weighted chunks.
+                        items[0].0.c = (items[0].0.c + G1Projective::generator()).into();
+                        items[size - 1].0.c =
+                            (items[size - 1].0.c - G1Projective::generator()).into();
+                        assert_batch_matches_single(&vk, &pvk, &items, &mut rng);
+                    }
+                }
+            });
+    }
+}
