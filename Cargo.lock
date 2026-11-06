@@ -112,7 +112,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.9.0"
-source = "git+https://github.com/upbqdn/bls12_381?rev=8aab794d8c493762bd53c4ecd20e2d3b7a7898cf#8aab794d8c493762bd53c4ecd20e2d3b7a7898cf"
+source = "git+https://github.com/upbqdn/bls12_381?rev=ca6d7becac33e0d9b8abc55192fd9202f47a1153#ca6d7becac33e0d9b8abc55192fd9202f47a1153"
 dependencies = [
  "ff",
  "group",
