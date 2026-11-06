@@ -309,7 +309,7 @@ where
         g1.extend(shared_g1);
         g2.extend(shared_g2);
 
-        if miller_loop::<E>(&g1, &g2).final_exponentiation() == E::Gt::identity() {
+        if miller_loop::<E>(&g1, &g2).final_exponentiation_vartime() == E::Gt::identity() {
             Ok(())
         } else {
             Err(VerificationError::InvalidProof)
@@ -397,7 +397,7 @@ where
                 let (g1, g2) = shared_terms(vk, &acc.gammas, acc.delta);
                 ml_result += miller_loop::<E>(&g1, &g2);
 
-                if ml_result.final_exponentiation() == E::Gt::identity() {
+                if ml_result.final_exponentiation_vartime() == E::Gt::identity() {
                     Ok(())
                 } else {
                     Err(VerificationError::InvalidProof)

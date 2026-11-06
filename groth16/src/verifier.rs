@@ -49,7 +49,7 @@ pub fn verify_proof<E: MultiMillerLoop>(
             (&acc.to_affine(), &pvk.neg_gamma_g2),
             (&proof.c, &pvk.neg_delta_g2),
         ])
-        .final_exponentiation()
+        .final_exponentiation_vartime()
     {
         Ok(())
     } else {
